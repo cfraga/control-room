@@ -1,7 +1,7 @@
 use leptos::*;
 use leptos_meta::*;
 use leptos_router::*;
-use std::{process::Command, fmt};
+use std::{process::Command, fmt, ops};
 use serde::{Deserialize, Serialize};
 
 #[component]
@@ -12,7 +12,7 @@ pub fn App() -> impl IntoView {
     view! {
         // injects a stylesheet into the document <head>
         // id=leptos means cargo-leptos will hot-reload this stylesheet
-        <Stylesheet id="leptos" href="/pkg/leptos_start.css"/>
+        <Stylesheet id="leptos" href="/assets/test.css"/>
 
         // sets the document title
         <Title text="Control Room"/>
@@ -32,23 +32,17 @@ pub fn App() -> impl IntoView {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct RemoteOp {
     op: AllowedOperation,
-    last_output: Option<String>,
-    last_status: Option<bool>
-}
-
-impl Default for RemoteOp {
-    fn default() -> Self {
-        Self {
-            op: AllowedOperation::Noop,
-            last_output: None,
-            last_status: None,
-        }
-    }
+    output: Option<String>,
+    status: Option<bool>
 }
 
 impl RemoteOp {
     fn is_running(&self) -> bool{
-        self.op != AllowedOperation::Noop && self.last_status.is_none()
+        self.op != AllowedOperation::Noop && self.status.is_none()
+    }
+
+    fn from_op(op: AllowedOperation) -> RemoteOp {
+        RemoteOp { op: op, output: None, status: None }
     }
 }
 
@@ -104,41 +98,42 @@ impl AllowedCommand {
         }
     }
 }
-#[server]
-pub async fn run_allowed_op(cmd: AllowedOperation) -> Result<String, ServerFnError>{
+#[server(RunAllowedOp)]
+pub async fn run_allowed_op(cmd: AllowedOperation) -> Result<RemoteOp, ServerFnError>{
     let output = match cmd {
         AllowedOperation::ShellCommand(cmd) => run_cmd(cmd).await,
-        AllowedOperation::ShellScript => Ok("Not Supported yet".to_string()),
-        AllowedOperation::Noop => Ok("NO OP".to_string())
+        AllowedOperation::ShellScript => Err(ServerFnError::ServerError("Not Supported yet".to_string())),
+        AllowedOperation::Noop => Ok(RemoteOp {op: cmd, output: Some("Nothing was done".to_string()), status: Some(true)})
     };
     logging::log!("{:#?}",output);
+
     output
 }
 
 #[server]
-pub async fn run_cmd(cmd: AllowedCommand) -> Result<String, ServerFnError>{
-    Ok(String::from_utf8(
-            Command::new(cmd.value())
-            // .args(&cmd.args().ok_or([]))
-            .output()
-            .expect("failed to execute")
-            .stdout)
-        .expect("failed to parse output")
-        .clone())
+pub async fn run_cmd(cmd: AllowedCommand) -> Result<RemoteOp, ServerFnError>{
+    let cmd_exec = Command::new(cmd.value())
+                    // .args(&cmd.args().ok_or([]))
+                    .output();
+
+    match cmd_exec {
+        Ok(output) => Ok(RemoteOp {op: AllowedOperation::ShellCommand(cmd), output: Some(String::from_utf8(output.stdout).expect("failed to parse output")), status: Some(output.status.success())}),
+        Err(e) => Err(ServerFnError::ServerError(e.to_string())),
+    }
 }
 
 #[component]
-fn OperationButton(exec_op: AllowedOperation, current_op: ReadSignal<RemoteOp>, set_current_op: WriteSignal<RemoteOp>, label: Option<String>) -> impl IntoView {
-    let cloned_op = exec_op.clone();
+fn OperationButton(exec_op: AllowedOperation, run_action: Action<AllowedOperation, Result<RemoteOp, ServerFnError>>, label: Option<String>) -> impl IntoView {
     let on_click = move |_| {
-        logging::log!("clicking button. is running? {}", current_op().is_running());
-        if !current_op().is_running() {
-            set_current_op.update(|remote_op| *remote_op = RemoteOp { op: cloned_op.clone(), last_status: None, last_output: None })
+        let cloned_op = exec_op.clone();
+        logging::log!("attempting {}...", cloned_op.to_string());
+        if !run_action.pending().get() { 
+            run_action.dispatch(cloned_op);
         }
     };
 
     view! {
-        <button on:click=on_click disabled={move || current_op().is_running()}>"random text"</button>
+        <div class="op-button-enabled" on:click=on_click disabled={move || run_action.pending().get()   }>{label}</div>
     }
 }
 
@@ -146,34 +141,47 @@ fn OperationButton(exec_op: AllowedOperation, current_op: ReadSignal<RemoteOp>, 
 #[component]
 fn HomePage() -> impl IntoView {
     // Creates a reactive value to update the button
-    let (current_op, set_current_op) = create_signal(RemoteOp::default());
-
-    let op_exec = create_resource(
-        current_op, 
-        |op| async move {
-            logging::log!("executing op");
-            run_allowed_op(op.op).await 
-        });
+    let (ops_log, set_ops_log) = create_signal(Vec::<RemoteOp>::new());
     
- 
+    let run_op = create_action(
+        |op: &AllowedOperation| {
+            let op = op.clone();
+            logging::log!("executing op");
+            async move { run_allowed_op(op).await }
+        });
+    let version = run_op.version();
+    
+    let updated_ops_log = move || {
+        logging::log!("updating ops log");
+        if let Some(val) = run_op.value().get() {
+            set_ops_log.update(|log| log.push(val.ok().unwrap()))
+        }
+    };
+    
     view! {
         <h1>"Welcome to Leptos!"</h1>
-        <OperationButton exec_op=AllowedOperation::ShellCommand(AllowedCommand::Ls) current_op=current_op set_current_op=set_current_op label=Some("LS".to_string()) />
+        <OperationButton exec_op=AllowedOperation::ShellCommand(AllowedCommand::Ls) run_action=run_op label=Some("LS".to_string()) />
         <Suspense fallback=move || view! { <p>"Loading..."</p> }>
             <div>
-            {move || match op_exec() {
-                None => "Click a button plzz?".to_string(),
-                Some(output) => output.unwrap()
-            }}
+            {
+                move || {
+                    if ops_log.with(Vec::is_empty) {
+                    view! { <div> "Click a button plzz?" </div>}.into_view()
+                    } else {
+                        ops_log().into_iter().map(
+                            move |op_log| {
+                                view! {
+                                    <div> "Op log entry here"</div>
+                                    <div> {op_log.output}</div>
+                                }
+                            }).collect_view()
+                    }
+                }
+            }
             </div>
-            </Suspense>
+        </Suspense>
     }
 }
-
-// #[component]
-// fn CommandButton(cmd: AllowedCommand) -> impl IntoView {
-
-// }
 
 /// 404 - Not Found
 #[component]
