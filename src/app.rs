@@ -1,7 +1,7 @@
 use leptos::*;
 use leptos_meta::*;
 use leptos_router::*;
-use std::{process::Command, fmt, ops};
+use std::{process::Command, fmt, ops, time::SystemTime};
 use serde::{Deserialize, Serialize};
 
 #[component]
@@ -33,16 +33,13 @@ pub fn App() -> impl IntoView {
 pub struct RemoteOp {
     op: AllowedOperation,
     output: Option<String>,
-    status: Option<bool>
+    status: Option<bool>,
+    timestamp: SystemTime,
 }
 
 impl RemoteOp {
-    fn is_running(&self) -> bool{
-        self.op != AllowedOperation::Noop && self.status.is_none()
-    }
-
     fn from_op(op: AllowedOperation) -> RemoteOp {
-        RemoteOp { op: op, output: None, status: None }
+        RemoteOp { op: op, output: None, status: None, timestamp: SystemTime::now()}
     }
 }
 
@@ -103,7 +100,7 @@ pub async fn run_allowed_op(cmd: AllowedOperation) -> Result<RemoteOp, ServerFnE
     let output = match cmd {
         AllowedOperation::ShellCommand(cmd) => run_cmd(cmd).await,
         AllowedOperation::ShellScript => Err(ServerFnError::ServerError("Not Supported yet".to_string())),
-        AllowedOperation::Noop => Ok(RemoteOp {op: cmd, output: Some("Nothing was done".to_string()), status: Some(true)})
+        AllowedOperation::Noop => Ok(RemoteOp {op: cmd, output: Some("Nothing was done".to_string()), status: Some(true), timestamp: SystemTime::now()})
     };
     logging::log!("{:#?}",output);
 
@@ -117,7 +114,7 @@ pub async fn run_cmd(cmd: AllowedCommand) -> Result<RemoteOp, ServerFnError>{
                     .output();
 
     match cmd_exec {
-        Ok(output) => Ok(RemoteOp {op: AllowedOperation::ShellCommand(cmd), output: Some(String::from_utf8(output.stdout).expect("failed to parse output")), status: Some(output.status.success())}),
+        Ok(output) => Ok(RemoteOp {op: AllowedOperation::ShellCommand(cmd), output: Some(String::from_utf8(output.stdout).expect("failed to parse output")), status: Some(output.status.success()), timestamp: SystemTime::now()}),
         Err(e) => Err(ServerFnError::ServerError(e.to_string())),
     }
 }
@@ -149,35 +146,28 @@ fn HomePage() -> impl IntoView {
             logging::log!("executing op");
             async move { run_allowed_op(op).await }
         });
-    let version = run_op.version();
-    
-    let updated_ops_log = move || {
-        logging::log!("updating ops log");
-        if let Some(val) = run_op.value().get() {
-            set_ops_log.update(|log| log.push(val.ok().unwrap()))
+
+    create_effect(move |_| {
+        if let Some(Ok(remote_op)) = run_op.value().get() {
+            logging::log!("updating ops log");
+            set_ops_log.update(|log| log.push(remote_op));
+            logging::log!("ops_log_count: {}", ops_log().len());
         }
-    };
-    
+    });
+
     view! {
         <h1>"Welcome to Leptos!"</h1>
         <OperationButton exec_op=AllowedOperation::ShellCommand(AllowedCommand::Ls) run_action=run_op label=Some("LS".to_string()) />
         <Suspense fallback=move || view! { <p>"Loading..."</p> }>
             <div>
-            {
-                move || {
-                    if ops_log.with(Vec::is_empty) {
-                    view! { <div> "Click a button plzz?" </div>}.into_view()
-                    } else {
-                        ops_log().into_iter().map(
-                            move |op_log| {
-                                view! {
-                                    <div> "Op log entry here"</div>
-                                    <div> {op_log.output}</div>
-                                }
-                            }).collect_view()
-                    }
-                }
-            }
+
+                <For each=ops_log
+                    key=|op| { op.timestamp.duration_since(SystemTime::UNIX_EPOCH).expect("no duration").as_secs() }
+                    let:child>
+                    <div>
+                        {child.output}
+                    </div>
+            </For>
             </div>
         </Suspense>
     }
