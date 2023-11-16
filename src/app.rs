@@ -1,7 +1,7 @@
-use leptos::*;
+use leptos::{*, html::output};
 use leptos_meta::*;
 use leptos_router::*;
-use std::{process::Command, fmt, ops, time::SystemTime};
+use std::{process::Command, fmt, ops, time::SystemTime, ffi::OsStr};
 use serde::{Deserialize, Serialize};
 
 #[component]
@@ -95,7 +95,7 @@ impl AllowedCommand {
             AllowedCommand::Ls => None,
             AllowedCommand::Pwd => None,
             AllowedCommand::Shutdown => Some(vec!["-h", "now"]),
-            AllowedCommand::TmuxList => Some(vec!["list"]),
+            AllowedCommand::TmuxList => Some(vec!["list-sessions"]),
         }
     }
 }
@@ -113,12 +113,18 @@ pub async fn run_allowed_op(cmd: AllowedOperation) -> Result<RemoteOp, ServerFnE
 
 #[server]
 pub async fn run_cmd(cmd: AllowedCommand) -> Result<RemoteOp, ServerFnError>{
-    let cmd_exec = Command::new(cmd.value())
-                    // .args(&cmd.args().ok_or([]))
-                    .output();
+    let mut cmd_exec = Command::new(cmd.value());
+    for arg in cmd.args().iter().flatten() {
+        cmd_exec.arg(arg);
+    }
 
-    match cmd_exec {
-        Ok(output) => Ok(RemoteOp {op: AllowedOperation::ShellCommand(cmd), output: Some(String::from_utf8(output.stdout).expect("failed to parse output")), status: Some(output.status.success()), timestamp: SystemTime::now()}),
+    match cmd_exec.output() {
+        Ok(output) => {
+            let mut stdio = String::from_utf8(output.stdout).expect("failed to parse output");
+            stdio.push_str("\n");
+            stdio.push_str(&String::from_utf8(output.stderr).expect("failed to parse output"));
+            Ok(RemoteOp {op: AllowedOperation::ShellCommand(cmd), output: Some(stdio), status: Some(output.status.success()), timestamp: SystemTime::now()})
+        },
         Err(e) => Err(ServerFnError::ServerError(e.to_string())),
     }
 }
