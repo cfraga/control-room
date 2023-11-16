@@ -1,7 +1,9 @@
 use leptos::{*, html::output};
 use leptos_meta::*;
 use leptos_router::*;
-use std::{process::Command, fmt, ops, time::SystemTime, ffi::OsStr};
+extern crate chrono;
+use chrono::{Utc, DateTime};
+use std::{process::Command, fmt, ops};
 use serde::{Deserialize, Serialize};
 
 #[component]
@@ -34,12 +36,12 @@ pub struct RemoteOp {
     op: AllowedOperation,
     output: Option<String>,
     status: Option<bool>,
-    timestamp: SystemTime,
+    timestamp: DateTime<Utc>,
 }
 
 impl RemoteOp {
     fn from_op(op: AllowedOperation) -> RemoteOp {
-        RemoteOp { op: op, output: None, status: None, timestamp: SystemTime::now()}
+        RemoteOp { op: op, output: None, status: None, timestamp: Utc::now()}
     }
 }
 
@@ -104,7 +106,7 @@ pub async fn run_allowed_op(cmd: AllowedOperation) -> Result<RemoteOp, ServerFnE
     let output = match cmd {
         AllowedOperation::ShellCommand(cmd) => run_cmd(cmd).await,
         AllowedOperation::ShellScript => Err(ServerFnError::ServerError("Not Supported yet".to_string())),
-        AllowedOperation::Noop => Ok(RemoteOp {op: cmd, output: Some("Nothing was done".to_string()), status: Some(true), timestamp: SystemTime::now()})
+        AllowedOperation::Noop => Ok(RemoteOp {op: cmd, output: Some("Nothing was done".to_string()), status: Some(true), timestamp: Utc::now()})
     };
     logging::log!("{:#?}",output);
 
@@ -123,7 +125,7 @@ pub async fn run_cmd(cmd: AllowedCommand) -> Result<RemoteOp, ServerFnError>{
             let mut stdio = String::from_utf8(output.stdout).expect("failed to parse output");
             stdio.push_str("\n");
             stdio.push_str(&String::from_utf8(output.stderr).expect("failed to parse output"));
-            Ok(RemoteOp {op: AllowedOperation::ShellCommand(cmd), output: Some(stdio), status: Some(output.status.success()), timestamp: SystemTime::now()})
+            Ok(RemoteOp {op: AllowedOperation::ShellCommand(cmd), output: Some(stdio), status: Some(output.status.success()), timestamp: Utc::now()})
         },
         Err(e) => Err(ServerFnError::ServerError(e.to_string())),
     }
@@ -174,10 +176,12 @@ fn HomePage() -> impl IntoView {
             <div>
 
                 <For each=ops_log
-                    key=|op| { op.timestamp.duration_since(SystemTime::UNIX_EPOCH).expect("no duration").as_secs() }
+                    key=|op| { op.timestamp.to_string() }
                     let:child>
                     <div>
-                        {child.output}
+                        <div>
+                            <span>{child.timestamp.format("%Y-%m-%d %H:%M:%S > ").to_string()}</span><span>{child.output}</span>
+                        </div>
                     </div>
             </For>
             </div>
