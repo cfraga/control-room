@@ -64,6 +64,7 @@ impl std::fmt::Display for AllowedOperation {
 pub enum AllowedCommand {
     Ls,
     Pwd,
+    TmuxList,
     Shutdown,
 }
 
@@ -73,6 +74,7 @@ impl std::fmt::Display for AllowedCommand {
             Self::Ls => write!(f, "ls"),
             Self::Pwd => write!(f, "pwd"),
             Self::Shutdown => write!(f, "shutdown"),
+            Self::TmuxList => write!(f, "tmux list")
         }
     }
 }
@@ -83,7 +85,8 @@ impl AllowedCommand {
         match *self {
             AllowedCommand::Ls => "ls",
             AllowedCommand::Pwd => "pwd",
-            AllowedCommand::Shutdown => "shutdown"
+            AllowedCommand::Shutdown => "shutdown",
+            AllowedCommand::TmuxList => "tmux",
         }
     }
 
@@ -92,6 +95,7 @@ impl AllowedCommand {
             AllowedCommand::Ls => None,
             AllowedCommand::Pwd => None,
             AllowedCommand::Shutdown => Some(vec!["-h", "now"]),
+            AllowedCommand::TmuxList => Some(vec!["list"]),
         }
     }
 }
@@ -130,7 +134,7 @@ fn OperationButton(exec_op: AllowedOperation, run_action: Action<AllowedOperatio
     };
 
     view! {
-        <div class="op-button-enabled" on:click=on_click disabled={move || run_action.pending().get()   }>{label}</div>
+        <div class="op-command-enabled" on:click=on_click disabled={move || run_action.pending().get()   }>{label}</div>
     }
 }
 
@@ -158,6 +162,8 @@ fn HomePage() -> impl IntoView {
     view! {
         <h1>"Welcome to Leptos!"</h1>
         <OperationButton exec_op=AllowedOperation::ShellCommand(AllowedCommand::Ls) run_action=run_op label=Some("LS".to_string()) />
+        <OperationButton exec_op=AllowedOperation::ShellCommand(AllowedCommand::Pwd) run_action=run_op label=Some("PWD".to_string()) />
+        <OperationButton exec_op=AllowedOperation::ShellCommand(AllowedCommand::TmuxList) run_action=run_op label=Some("Tmux Sessions".to_string()) />
         <Suspense fallback=move || view! { <p>"Loading..."</p> }>
             <div>
 
