@@ -21,3 +21,44 @@ body {
 .op-command-disabled {
 
 }
+
+.app-log-op {
+	position: relative;
+}
+
+.app-log-op-row {
+	display: table-row;
+	height: 2.2em;
+}
+
+span.log-op-row {
+	vertical-align: middle;
+	display: table-cell;
+}
+
+.log-area {
+	border-style: groove;
+	padding: 2em 1em 2em 1em;
+	text-align: left;
+	font-family: monospace;
+}
+
+.status-success-true::before {
+	background-color: #5cca5cba;
+	display: inline;
+	padding: 0.4em;
+	content: ' ';
+	border-radius: 0%;
+	vertical-align: middle;
+	margin-right: 0.3em;
+}
+
+.status-success-false::before {
+	background-color: #e85019ba;
+	display: inline;
+	padding: 0.4em;
+	content: ' ';
+	border-radius: 0%;
+	vertical-align: middle;
+	margin-right: 0.3em;
+}

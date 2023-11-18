@@ -35,15 +35,15 @@ pub fn App() -> impl IntoView {
 pub struct RemoteOp {
     op: AllowedOperation,
     output: Option<String>,
-    status: Option<bool>,
+    status: bool,
     timestamp: DateTime<Utc>,
 }
 
-impl RemoteOp {
-    fn from_op(op: AllowedOperation) -> RemoteOp {
-        RemoteOp { op: op, output: None, status: None, timestamp: Utc::now()}
-    }
-}
+// impl RemoteOp {
+//     fn from_op(op: AllowedOperation) -> RemoteOp {
+//         RemoteOp { op: op, output: None, status: None, timestamp: Utc::now()}
+//     }
+// }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub enum AllowedOperation {
@@ -106,7 +106,7 @@ pub async fn run_allowed_op(cmd: AllowedOperation) -> Result<RemoteOp, ServerFnE
     let output = match cmd {
         AllowedOperation::ShellCommand(cmd) => run_cmd(cmd).await,
         AllowedOperation::ShellScript => Err(ServerFnError::ServerError("Not Supported yet".to_string())),
-        AllowedOperation::Noop => Ok(RemoteOp {op: cmd, output: Some("Nothing was done".to_string()), status: Some(true), timestamp: Utc::now()})
+        AllowedOperation::Noop => Ok(RemoteOp {op: cmd, output: Some("Nothing was done".to_string()), status: true, timestamp: Utc::now()})
     };
     logging::log!("{:#?}",output);
 
@@ -125,7 +125,7 @@ pub async fn run_cmd(cmd: AllowedCommand) -> Result<RemoteOp, ServerFnError>{
             let mut stdio = String::from_utf8(output.stdout).expect("failed to parse output");
             stdio.push_str("\n");
             stdio.push_str(&String::from_utf8(output.stderr).expect("failed to parse output"));
-            Ok(RemoteOp {op: AllowedOperation::ShellCommand(cmd), output: Some(stdio), status: Some(output.status.success()), timestamp: Utc::now()})
+            Ok(RemoteOp {op: AllowedOperation::ShellCommand(cmd), output: Some(stdio), status: output.status.success(), timestamp: Utc::now()})
         },
         Err(e) => Err(ServerFnError::ServerError(e.to_string())),
     }
@@ -173,14 +173,14 @@ fn HomePage() -> impl IntoView {
         <OperationButton exec_op=AllowedOperation::ShellCommand(AllowedCommand::Pwd) run_action=run_op label=Some("PWD".to_string()) />
         <OperationButton exec_op=AllowedOperation::ShellCommand(AllowedCommand::TmuxList) run_action=run_op label=Some("Tmux Sessions".to_string()) />
         <Suspense fallback=move || view! { <p>"Loading..."</p> }>
-            <div>
+            <div class="log-area">
 
                 <For each=ops_log
                     key=|op| { op.timestamp.to_string() }
                     let:child>
-                    <div>
-                        <div>
-                            <span>{child.timestamp.format("%Y-%m-%d %H:%M:%S > ").to_string()}</span><span>{child.output}</span>
+                    <div class="app-log-op">
+                        <div class="app-log-op-row">
+                            <span class=format!("status-success-{}", child.status)>{child.op.to_string()}{" | "}</span><span>{child.timestamp.format("%Y-%m-%d %H:%M:%S > ").to_string()}</span><span>{child.output}</span>
                         </div>
                     </div>
             </For>
